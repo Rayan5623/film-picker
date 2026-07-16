@@ -12,6 +12,10 @@ dotenv.config();
 
 const app = express();
 
+// necessario dietro il proxy di Render: senza, req.ip è lo stesso per tutti
+// e i rate limiter (per IP) collassano tutti gli utenti in un unico bucket
+app.set('trust proxy', 1);
+
 // per immagini
 const uploadImage = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -78,7 +82,14 @@ app.post('/api/films', (req, res) => {
   const { title, genre, type } = req.body;
   if (!title?.trim()) return res.status(400).json({ error: 'Titolo obbligatorio' });
   if (title.length > 200) return res.status(400).json({ error: 'Titolo troppo lungo' });
-  insert(title.trim(), (genre || '').slice(0, 200), type || 'film');
+  try {
+    insert(title.trim(), (genre || '').slice(0, 200), type === 'serie' ? 'serie' : 'film');
+  } catch (err) {
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ error: 'Titolo già presente in lista' });
+    }
+    throw err;
+  }
   res.json(getAll());
 });
 
@@ -98,9 +109,17 @@ app.delete('/api/films/:id', (req, res) => {
 
 app.post('/api/films/bulk', (req, res) => {
   const { films } = req.body;
-  if (!films?.length) return res.status(400).json({ error: 'Nessun film' });
+  if (!Array.isArray(films) || !films.length) return res.status(400).json({ error: 'Nessun film' });
   if (films.length > 100) return res.status(400).json({ error: 'Massimo 100 film per volta' });
-  bulkInsert(films);
+  const valid = films
+    .filter(f => f && typeof f.title === 'string' && f.title.trim())
+    .map(f => ({
+      title: f.title.trim().slice(0, 200),
+      genre: (f.genre || '').slice(0, 200),
+      type: f.type === 'serie' ? 'serie' : 'film'
+    }));
+  if (!valid.length) return res.status(400).json({ error: 'Nessun titolo valido' });
+  bulkInsert(valid);
   res.json(getAll());
 });
 
@@ -179,8 +198,11 @@ app.post('/api/extract', extractLimiter, uploadImage.single('image'), async (req
 
 // Gestione errori multer
 app.use((err, req, res, next) => {
-  if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'Immagine troppo grande (max 5MB)' });
-  if (err.message === 'Solo immagini accettate') return res.status(400).json({ error: err.message });
+  if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'File troppo grande' });
+  if (err.message === 'Solo immagini accettate' || err.message === 'Solo file CSV accettati') {
+    return res.status(400).json({ error: err.message });
+  }
+  console.error('Errore non gestito:', err.message);
   res.status(500).json({ error: 'Errore interno del server' });
 });
 

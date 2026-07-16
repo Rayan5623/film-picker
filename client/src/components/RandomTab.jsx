@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLang } from '../LangContext';
 
 export default function RandomTab({ films }) {
@@ -7,6 +7,10 @@ export default function RandomTab({ films }) {
   const [pick, setPick] = useState(null);
   const [rolling, setRolling] = useState(false);
   const [ignored, setIgnored] = useState([]);
+  const intervalRef = useRef(null);
+
+  // pulizia dell'interval se il componente viene smontato durante il "roll"
+  useEffect(() => () => clearInterval(intervalRef.current), []);
 
   const pool = films.filter(f => {
     if (f.watched) return false;
@@ -17,12 +21,13 @@ export default function RandomTab({ films }) {
 
   const spin = () => {
     if (!pool.length) return;
+    clearInterval(intervalRef.current);
     setRolling(true);
     let count = 0;
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setPick(pool[Math.floor(Math.random() * pool.length)]);
       if (++count > 20) {
-        clearInterval(interval);
+        clearInterval(intervalRef.current);
         setRolling(false);
         setPick(pool[Math.floor(Math.random() * pool.length)]);
       }
