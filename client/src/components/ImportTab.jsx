@@ -16,7 +16,11 @@ export default function ImportTab({ api, onImport }) {
   const handleFile = (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    setFile(f); setPreview(URL.createObjectURL(f));
+    setFile(f);
+    setPreview(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(f);
+    });
     setResults([]); setSelected([]); setError('');
   };
 
@@ -35,8 +39,14 @@ export default function ImportTab({ api, onImport }) {
 
   const handleImport = async () => {
     const toImport = results.filter((_, i) => selected.includes(i));
-    const res = await axios.post(`${api}/api/films/bulk`, { films: toImport });
-    onImport(res.data);
+    if (!toImport.length) return;
+    setError('');
+    try {
+      const res = await axios.post(`${api}/api/films/bulk`, { films: toImport });
+      onImport(res.data);
+    } catch (err) {
+      setError('Errore import: ' + (err.response?.data?.error || err.message));
+    }
   };
 
   const handleCSV = async (e) => {
